@@ -68,7 +68,7 @@ is = contract { message = s: "Value should be of type `${s.type}':"; };
 # TODO I'm not sure if this would be really handy:
 #     FunctionArgs = args: f: args == builtins.functionArgs f;
 # ... because I would prefer something like:
-fn = Args: f: x: f (is (def Args) x);
+fn = arg: f: x: f (is (def arg) x);
 
 /* Force the concrete evaluation of a contract or any datatype */
 strict = e: builtins.deepSeq e e;
@@ -135,6 +135,10 @@ match   = regex: # FIXME check if `regex` is of `Regex` type!
 # From https://www.rfc-editor.org/rfc/rfc3986#page-50
 Url     = match ''^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?'';
 
+Drv = declare { name = "Derivation"; } { type = "derivation"; };
+Maybe = declare { name = "Maybe"; } (x: enum [ Null x ]); # TODO
+Unit = declare { name = "{}"; } { }; # TODO: This just behaves like Set type ...
+
 /* *** Some type ideas for the future *** */
 Hash    = TODO; # FIXME SRI hashes used by Nix :)
 Regex   = TODO; # It would be nice to check if a RegEx is valid ...
@@ -146,7 +150,47 @@ SemVer  = TODO; # ... or if a software version is in SemVer format!
 # This is internal mixture that helps to have declared types available here:
 prelude = (builtins.mapAttrs (n: _: declare { name = n; } types.${n}) types);
 
+# Compatibility with https://code.tvl.fyi/about/nix/yants :)
+# blob: f2318fa54a0f464b0e61afa181fbe7b24d632ccd
+
+yants = with prelude;
+# TODO: redefine `is` such as it return a functor and not an opaque lamda ...
+let unwrap = f: declare { name = "?"; } (x: (builtins.tryEval (f x)).success);
+    opt = name: if Str name
+                then x: is (declare { inherit name; } x)
+                else is (def name);
+in {
+  any = is Any;
+  attrs = x: is (setOf (unwrap x));
+  bool = is Bool;
+  defun = args: f:
+      let x  = builtins.head args;
+          xs = builtins.tail args; in
+      i: (if builtins.length args > 2
+          then defun
+          else builtins.head)
+        xs (f (x i));
+  drv = is Drv;
+  either = t1: t2: is (prelude.enum [ (unwrap t1) (unwrap t2) ]);
+  eitherN = x: is (prelude.enum (builtins.map unwrap x));
+  # FIXME: add support to pattern matching as .match "foo" { foo = ...; }
+  enum = opt prelude.enum;
+  float = is Float;
+  function = is (prelude.enum [ Lambda Functor ]);
+  int = is Int;
+  list = x: is (listOf (unwrap x));
+  null = is Null;
+  option = is Maybe;
+  path = is Path;
+  restrict = name: pred: t: x: contract { inherit name; } (pred (def t x));
+  string = is Str;
+  struct = opt;
+  sum = opt both;
+  type = is Type;
+  unit = is Unit;
+};
+
 in prelude // {
   # Explicitly choose what would be our library interface (and eventually not)
-  inherit declare def default contract is fn strict;
+  inherit declare def default contract is fn strict yants;
 }
